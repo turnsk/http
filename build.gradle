@@ -1,0 +1,20 @@
+apply plugin: 'java'
+apply plugin: 'maven'
+
+repositories {
+  mavenCentral()
+}
+
+group = 'sk.turn'
+
+sourceCompatibility = 1.6
+version = '1.0'
+jar {
+  manifest {
+    attributes 'Implementation-Version': version
+  }
+}
+
+dependencies {
+  testCompile 'junit:junit:4.12'
+}
