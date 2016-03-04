@@ -5,10 +5,9 @@ repositories {
   mavenCentral()
 }
 
+sourceCompatibility = 1.7
 group = 'sk.turn'
-
-sourceCompatibility = 1.6
-version = '1.0'
+version = '1.1'
 jar {
   manifest {
     attributes 'Implementation-Version': version
@@ -17,4 +16,19 @@ jar {
 
 dependencies {
   testCompile 'junit:junit:4.12'
+}
+
+task sourcesJar(type: Jar) {
+  from sourceSets.main.java.srcDirs
+  classifier = 'sources'
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+  classifier = 'javadoc'
+  from javadoc.destinationDir
+}
+
+artifacts {
+  archives sourcesJar
+  archives javadocJar
 }

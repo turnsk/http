@@ -174,7 +174,7 @@ public class Http {
 		URL url = new URL(this.url + (method.equalsIgnoreCase(GET) && params != null ? "?" + params : ""));
 		HttpURLConnection conn = (HttpURLConnection) url.openConnection();
 		conn.setRequestMethod(method);
-		conn.setFollowRedirects(false);
+		conn.setInstanceFollowRedirects(false);
 		conn.setUseCaches(false);
 		if (timeoutConnect != -1) {
 			conn.setConnectTimeout(timeoutConnect);
