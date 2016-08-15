@@ -14,6 +14,7 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -266,7 +267,7 @@ public class Http implements Closeable {
 		}
 		responseCode = connection.getResponseCode();
 		responseMessage = connection.getResponseMessage();
-		responseHeaders = connection.getHeaderFields();
+		responseHeaders = reindexHeaderMap(connection.getHeaderFields());
 		return this;
 	}
 
@@ -316,6 +317,7 @@ public class Http implements Closeable {
 	 * @return First HTTP response header value or null if none such header exists.
 	 */
 	public String getResponseHeader(String key) {
+		key = key.toLowerCase();
 		return (responseHeaders == null || !responseHeaders.containsKey(key) ? null : responseHeaders.get(key).get(0));
 	}
 
@@ -325,6 +327,7 @@ public class Http implements Closeable {
 	 * @return List of HTTP response header values.
 	 */
 	public List<String> getResponseHeaders(String key) {
+		key = key.toLowerCase();
 		return (responseHeaders == null ? new ArrayList<String>() : responseHeaders.get(key));
 	}
 
@@ -427,6 +430,14 @@ public class Http implements Closeable {
 			total += read;
 		}
 		return total;
+	}
+
+	private Map<String, List<String>> reindexHeaderMap(Map<String, List<String>> headers) {
+		Map<String, List<String>> newHeaders = new HashMap<>();
+		for (Map.Entry<String, List<String>> header : headers.entrySet()) {
+			newHeaders.put(header.getKey().toLowerCase(), header.getValue());
+		}
+		return newHeaders;
 	}
 
 }
