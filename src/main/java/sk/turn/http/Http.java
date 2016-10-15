@@ -435,7 +435,9 @@ public class Http implements Closeable {
 	private Map<String, List<String>> reindexHeaderMap(Map<String, List<String>> headers) {
 		Map<String, List<String>> newHeaders = new HashMap<>();
 		for (Map.Entry<String, List<String>> header : headers.entrySet()) {
-			newHeaders.put(header.getKey().toLowerCase(), header.getValue());
+			if (header.getKey() != null) {
+				newHeaders.put(header.getKey().toLowerCase(), header.getValue());
+			}
 		}
 		return newHeaders;
 	}
