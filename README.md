@@ -1,8 +1,8 @@
 # http
 Single-class easy-to-use Java HTTP utility wrapping standard Java URLConnection class and other related classes.
 
-[Read Javadoc](https://jitpack.io/sk/turn/http/1.4/javadoc/)
-[Download JAR](https://jitpack.io/sk/turn/http/1.4/http-1.4.jar)
+[Read Javadoc](https://jitpack.io/sk/turn/http/1.5/javadoc/)
+[Download JAR](https://jitpack.io/sk/turn/http/1.5/http-1.5.jar)
 
 ## Setup
 ### Gradle
@@ -19,7 +19,7 @@ Add the dependecy to the `build.gradle`
 ```gradle
 dependencies {
     ...
-    compile 'sk.turn:http:1.4'
+    compile 'sk.turn:http:1.5'
 }
 ```
 

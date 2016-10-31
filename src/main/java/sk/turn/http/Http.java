@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -370,7 +371,11 @@ public class Http implements Closeable {
 		if (connection == null) {
 			throw new IllegalStateException("Method send() has not been called yet or the connection was already closed.");
 		}
-		return connection.getInputStream();
+		try {
+			return connection.getInputStream();
+		} catch (FileNotFoundException e) {
+			return connection.getErrorStream();
+		}
 	}
 
 	/**
