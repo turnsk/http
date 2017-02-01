@@ -1,5 +1,8 @@
 package sk.turn.http;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonParseException;
+
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
@@ -8,6 +11,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
@@ -375,6 +379,26 @@ public class Http implements Closeable {
 			return connection.getInputStream();
 		} catch (FileNotFoundException e) {
 			return connection.getErrorStream();
+		}
+	}
+
+	/**
+	 * Returns the response deserialized as an object. This method assumes that the response is a valid JSON.
+	 * This method uses {@link #getResponseStream()} method and takes care of closing the stream.
+	 * @return The object deserialized from the response JSON.
+	 * @throws IOException When the underlying response stream cannot be opened.
+	 * @throws JsonParseException When the response cannot be parsed as a valid JSON.
+	 */
+	public <T> T getResponseObject(Class<? extends T> classType) throws IOException, JsonParseException {
+		InputStream inputStream = null;
+		try {
+			inputStream = getResponseStream();
+			return new Gson().fromJson(new InputStreamReader(inputStream), classType);
+		} finally {
+			if (inputStream != null) {
+				try { inputStream.close(); }
+				catch (IOException e) { }
+			}
 		}
 	}
 

@@ -7,7 +7,7 @@ repositories {
 
 sourceCompatibility = 1.7
 group = 'sk.turn'
-version = '1.5'
+version = '1.6'
 jar {
   manifest {
     attributes 'Implementation-Version': version
@@ -15,6 +15,7 @@ jar {
 }
 
 dependencies {
+  compile 'com.google.code.gson:gson:2.4'
   testCompile 'junit:junit:4.12'
 }
 
