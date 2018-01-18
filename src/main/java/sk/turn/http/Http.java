@@ -430,7 +430,7 @@ public class Http implements Closeable {
 		FileOutputStream fileStream = null;
 		try {
 			fileStream = new FileOutputStream(file);
-			return writeResponseToStream(new FileOutputStream(file));
+			return writeResponseToStream(fileStream);
 		} finally {
 			if (fileStream != null) {
 				fileStream.close();
