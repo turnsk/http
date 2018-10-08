@@ -15,6 +15,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -100,6 +102,8 @@ public class Http implements Closeable {
 	private final Map<String, String> params;
 	private int timeoutConnect = -1;
 	private int timeoutRead = -1;
+	private String proxyHost;
+	private int proxyPort;
 	private byte[] requestData;
 	private InputStream inputStream;
 	private boolean inputStreamCloseWhenRead;
@@ -159,6 +163,18 @@ public class Http implements Closeable {
 	 */
 	public Http setReadTimeout(int ms) {
 		timeoutRead = ms;
+		return this;
+	}
+
+	/**
+	 * Sets the proxy for this request.
+	 * @param host The proxy host.
+	 * @param port The proxy port.
+	 * @return This Http object for easy call chaining.
+	 */
+	public Http setProxy(String host, int port) {
+		proxyHost = host;
+		proxyPort = port;
 		return this;
 	}
 
@@ -234,7 +250,8 @@ public class Http implements Closeable {
 			params = sb.substring(0, sb.length() - 1);
 		}
 		URL url = new URL(this.url + (method.equalsIgnoreCase(GET) && params != null ? "?" + params : ""));
-		connection = (HttpURLConnection) url.openConnection();
+		connection = (HttpURLConnection) (proxyHost == null || proxyHost.length() == 0 || proxyPort == 0 ? url.openConnection() :
+				url.openConnection(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort))));
 		connection.setRequestMethod(method);
 		connection.setInstanceFollowRedirects(false);
 		connection.setUseCaches(false);
