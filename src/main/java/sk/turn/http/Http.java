@@ -57,6 +57,27 @@ public class Http implements Closeable {
 	}
 
 	/**
+	 * A listener interface to receive the result of the asynchronous HTTP call.
+	 * 
+	 * @see Http#send(Listener)
+	 */
+	public interface ProgressListener {
+		/**
+		 * Is called every time the amount of data downloaded changes.
+		 * 
+		 * @param bytesReceived Number of bytes already transmitted.
+		 * @param bytesTotal Total number of bytes to transmit, may be -1 if Content-Length header is not set.
+		 * 
+		 * @see Http#setProgressListener(ProgressListener)
+		 * @see Http#getResponseData()
+		 * @see Http#getResponseString()
+		 * @see Http#writeResponseToStream(OutputStream)
+		 * @see Http#writeResponseToFile(File)
+		 */
+		void onHttpProgress(int bytesReceived, int bytesTotal);
+	}
+
+	/**
 	 * Constant for HTTP get method.
 	 */
 	public static final String GET = "GET";
@@ -111,6 +132,7 @@ public class Http implements Closeable {
 	private String responseMessage;
 	private Map<String, List<String>> responseHeaders;
 	private HttpURLConnection connection;
+	private ProgressListener progressListener;
 
 	/**
 	 * Creates a HTTP object to an URL using a specific method.
@@ -354,6 +376,18 @@ public class Http implements Closeable {
 	}
 
 	/**
+	 * Sets the progress listener to watch data download progress.
+	 * @param progressListener The callback listener.
+	 * @see Http#getResponseData()
+	 * @see Http#getResponseString()
+	 * @see Http#writeResponseToStream(OutputStream)
+	 * @see Http#writeResponseToFile(File)
+	 */
+	public void setProgressListener(ProgressListener progressListener) {
+		this.progressListener = progressListener;
+	}
+
+	/**
 	 * Returns the raw response data.
 	 * @return Raw response data.
 	 * @throws IOException When the underlying response stream cannot be read.
@@ -469,11 +503,20 @@ public class Http implements Closeable {
 	}
 
 	private int copyStream(InputStream input, OutputStream output) throws IOException {
+		String contentLengthString = getResponseHeader("Content-Length");
+		int contentLength = (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ? 
+				Integer.parseInt(contentLengthString) : -1;
 		byte[] buffer = new byte[BUFFER_SIZE];
 		int read, total = 0;
+		if (progressListener != null) {
+			progressListener.onHttpProgress(total, contentLength);
+		}
 		while ((read = input.read(buffer, 0, buffer.length)) >= 0) {
 			output.write(buffer, 0, read);
 			total += read;
+			if (progressListener != null) {
+				progressListener.onHttpProgress(total, contentLength);
+			}
 		}
 		return total;
 	}
