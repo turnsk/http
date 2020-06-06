@@ -3,6 +3,7 @@ package sk.turn.http;
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 
+import javax.net.ssl.*;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
@@ -20,11 +21,13 @@ import java.net.Proxy;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -35,15 +38,15 @@ public class Http implements Closeable {
 
 	/**
 	 * A listener interface to receive the result of the asynchronous HTTP call.
-	 * 
+	 *
 	 * @see Http#send(Listener)
 	 */
 	public interface Listener {
 		/**
 		 * Is called when using the asynchronous version of {@link Http#send(Listener)}
-		 * 
+		 *
 		 * @param http The Http object containing the response fields.
-		 * 
+		 *
 		 * @see Http#getResponseCode()
 		 * @see Http#getResponseMessage()
 		 * @see Http#getResponseHeader(String)
@@ -58,16 +61,16 @@ public class Http implements Closeable {
 
 	/**
 	 * A listener interface to receive the result of the asynchronous HTTP call.
-	 * 
+	 *
 	 * @see Http#send(Listener)
 	 */
 	public interface ProgressListener {
 		/**
 		 * Is called every time the amount of data downloaded changes.
-		 * 
+		 *
 		 * @param bytesReceived Number of bytes already transmitted.
 		 * @param bytesTotal Total number of bytes to transmit, may be -1 if Content-Length header is not set.
-		 * 
+		 *
 		 * @see Http#setProgressListener(ProgressListener)
 		 * @see Http#getResponseData()
 		 * @see Http#getResponseString()
@@ -132,6 +135,7 @@ public class Http implements Closeable {
 	private String responseMessage;
 	private Map<String, List<String>> responseHeaders;
 	private HttpURLConnection connection;
+	private SSLContext tlsContext;
 	private ProgressListener progressListener;
 
 	/**
@@ -254,6 +258,27 @@ public class Http implements Closeable {
 		return setData(new FileInputStream(file), true);
 	}
 
+  /**
+   * Sets the root certificate to be trusted (certificate pinning). When using this, the System certificate
+   * store is ignored and only this certificate is implicitly trusted.
+   * @param certificate A trusted certificate
+   * @return This Http object for easy call chaining.
+   */
+	public Http setTrustedRoot(X509Certificate certificate) throws IllegalArgumentException {
+	  try {
+      KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+      keyStore.load(null, null);
+      keyStore.setCertificateEntry("ca", certificate);
+      TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+      tmf.init(keyStore);
+      tlsContext = SSLContext.getInstance("TLS");
+      tlsContext.init(null, tmf.getTrustManagers(), null);
+    } catch (Exception e) {
+	    throw new IllegalArgumentException(e);
+    }
+	  return this;
+  }
+
 	/**
 	 * Sends the HTTP request synchronously.
 	 * @return This Http object for easy call chaining.
@@ -272,8 +297,18 @@ public class Http implements Closeable {
 			params = sb.substring(0, sb.length() - 1);
 		}
 		URL url = new URL(this.url + (method.equalsIgnoreCase(GET) && params != null ? "?" + params : ""));
-		connection = (HttpURLConnection) (proxyHost == null || proxyHost.length() == 0 || proxyPort == 0 ? url.openConnection() :
-				url.openConnection(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort))));
+		if (proxyHost == null || proxyHost.length() == 0 || proxyPort == 0) {
+		  connection = (HttpURLConnection) url.openConnection();
+    } else {
+		  connection = (HttpURLConnection) url.openConnection(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
+    }
+    if (tlsContext != null) {
+      if (connection instanceof HttpsURLConnection) {
+        ((HttpsURLConnection) connection).setSSLSocketFactory(tlsContext.getSocketFactory());
+      } else {
+        throw new IllegalStateException("Trusted root was set but no HTTPS was used.");
+      }
+    }
 		connection.setRequestMethod(method);
 		connection.setInstanceFollowRedirects(false);
 		connection.setUseCaches(false);
@@ -316,10 +351,10 @@ public class Http implements Closeable {
 	}
 
 	/**
-	 * Sends the HTTP request asynchronously. A cached thread pool executor is used to spawn new or reuse threads 
-	 * (see {@link java.util.concurrent.Executors#newCachedThreadPool()}). In case the connection fails with an 
-	 * {@link java.io.IOException}, the {@link Http#getResponseCode()} is set to -1 and {@link Http#getResponseMessage()} 
-	 * to {@link java.io.IOException#toString()}. The listener is called from the background thread, not from the thread 
+	 * Sends the HTTP request asynchronously. A cached thread pool executor is used to spawn new or reuse threads
+	 * (see {@link java.util.concurrent.Executors#newCachedThreadPool()}). In case the connection fails with an
+	 * {@link java.io.IOException}, the {@link Http#getResponseCode()} is set to -1 and {@link Http#getResponseMessage()}
+	 * to {@link java.io.IOException#toString()}. The listener is called from the background thread, not from the thread
 	 * this method is called.
 	 * @param listener Callback interface to receive the {@link Listener#onHttpResult(Http)} notification.
 	 * @return This Http object for easy call chaining.
@@ -504,7 +539,7 @@ public class Http implements Closeable {
 
 	private int copyStream(InputStream input, OutputStream output) throws IOException {
 		String contentLengthString = getResponseHeader("Content-Length");
-		int contentLength = (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ? 
+		int contentLength = (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ?
 				Integer.parseInt(contentLengthString) : -1;
 		byte[] buffer = new byte[BUFFER_SIZE];
 		int read, total = 0;

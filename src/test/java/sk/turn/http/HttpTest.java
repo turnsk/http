@@ -17,7 +17,7 @@ public class HttpTest {
 		Http http = new Http("http://httpstat.us/301", Http.GET).send();
 		Assert.assertEquals(301, http.getResponseCode());
 		Assert.assertEquals("Moved Permanently", http.getResponseMessage());
-		Assert.assertEquals("http://httpstat.us", http.getResponseHeader("Location"));
+		Assert.assertEquals("https://httpstat.us", http.getResponseHeader("Location"));
 	}
 
 	@Test
