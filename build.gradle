@@ -1,5 +1,7 @@
-apply plugin: 'java'
-apply plugin: 'maven'
+plugins {
+  id 'java'
+  id 'maven-publish'
+}
 
 repositories {
   mavenCentral()
@@ -8,6 +10,7 @@ repositories {
 sourceCompatibility = 1.7
 group = 'sk.turn'
 version = '1.7.1'
+
 jar {
   manifest {
     attributes 'Implementation-Version': version
@@ -15,21 +18,19 @@ jar {
 }
 
 dependencies {
-  compile 'com.google.code.gson:gson:2.4'
-  testCompile 'junit:junit:4.12'
+  implementation 'com.google.code.gson:gson:2.4'
+  testImplementation 'junit:junit:4.12'
 }
 
-task sourcesJar(type: Jar) {
-  from sourceSets.main.java.srcDirs
-  classifier = 'sources'
+java {
+  withSourcesJar()
+  withJavadocJar()
 }
 
-task javadocJar(type: Jar, dependsOn: javadoc) {
-  classifier = 'javadoc'
-  from javadoc.destinationDir
-}
-
-artifacts {
-  archives sourcesJar
-  archives javadocJar
+publishing {
+  publications {
+    maven(MavenPublication) {
+      from components.java
+    }
+  }
 }

@@ -4,17 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 
 import javax.net.ssl.*;
-import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -22,10 +12,6 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.Certificate;
-import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -66,7 +52,7 @@ public class Http implements Closeable {
 	 */
 	public interface ProgressListener {
 		/**
-		 * Is called every time the amount of data downloaded changes.
+		 * Is called every time the amount of data downloaded (or uploaded) changes.
 		 *
 		 * @param bytesReceived Number of bytes already transmitted.
 		 * @param bytesTotal Total number of bytes to transmit, may be -1 if Content-Length header is not set.
@@ -136,7 +122,8 @@ public class Http implements Closeable {
 	private Map<String, List<String>> responseHeaders;
 	private HttpURLConnection connection;
 	private SSLContext tlsContext;
-	private ProgressListener progressListener;
+	private ProgressListener downloadProgressListener;
+	private ProgressListener uploadProgressListener;
 
 	/**
 	 * Creates a HTTP object to an URL using a specific method.
@@ -250,34 +237,41 @@ public class Http implements Closeable {
 	 * Sets the data to send as HTTP post body to be read from a file. Note, that the file must exist
 	 * when the actual request is being sent, either synchronously (during calling {@link Http#send()})
 	 * or asynchronously (before {@link Http.Listener#onHttpResult(Http)} is called).
+	 * If header "Content-Length" is not already set, it will be set to the supplied file size in bytes.
 	 * @param file A valid {@link java.io.File} reference.
 	 * @return This Http object for easy call chaining.
 	 * @throws IOException When the supplied file cannot be opened.
 	 */
 	public Http setData(File file) throws IOException {
+		if (!file.exists() || !file.isFile()) {
+			throw new IOException("Invalid file");
+		}
+		if (!headers.containsKey("Content-Length")) {
+			addHeader("Content-Length", String.valueOf(file.length()));
+		}
 		return setData(new FileInputStream(file), true);
 	}
 
-  /**
-   * Sets the root certificate to be trusted (certificate pinning). When using this, the System certificate
-   * store is ignored and only this certificate is implicitly trusted.
-   * @param certificate A trusted certificate
-   * @return This Http object for easy call chaining.
-   */
+	/**
+	 * Sets the root certificate to be trusted (certificate pinning). When using this, the System certificate
+	 * store is ignored and only this certificate is implicitly trusted.
+	 * @param certificate A trusted certificate
+	 * @return This Http object for easy call chaining.
+	 */
 	public Http setTrustedRoot(X509Certificate certificate) throws IllegalArgumentException {
-	  try {
-      KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-      keyStore.load(null, null);
-      keyStore.setCertificateEntry("ca", certificate);
-      TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-      tmf.init(keyStore);
-      tlsContext = SSLContext.getInstance("TLS");
-      tlsContext.init(null, tmf.getTrustManagers(), null);
-    } catch (Exception e) {
-	    throw new IllegalArgumentException(e);
-    }
-	  return this;
-  }
+		try {
+			KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+			keyStore.load(null, null);
+			keyStore.setCertificateEntry("ca", certificate);
+			TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+			tmf.init(keyStore);
+			tlsContext = SSLContext.getInstance("TLS");
+			tlsContext.init(null, tmf.getTrustManagers(), null);
+		} catch (Exception e) {
+			throw new IllegalArgumentException(e);
+		}
+		return this;
+	}
 
 	/**
 	 * Sends the HTTP request synchronously.
@@ -298,17 +292,17 @@ public class Http implements Closeable {
 		}
 		URL url = new URL(this.url + (method.equalsIgnoreCase(GET) && params != null ? "?" + params : ""));
 		if (proxyHost == null || proxyHost.length() == 0 || proxyPort == 0) {
-		  connection = (HttpURLConnection) url.openConnection();
-    } else {
-		  connection = (HttpURLConnection) url.openConnection(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
-    }
-    if (tlsContext != null) {
-      if (connection instanceof HttpsURLConnection) {
-        ((HttpsURLConnection) connection).setSSLSocketFactory(tlsContext.getSocketFactory());
-      } else {
-        throw new IllegalStateException("Trusted root was set but no HTTPS was used.");
-      }
-    }
+			connection = (HttpURLConnection) url.openConnection();
+		} else {
+			connection = (HttpURLConnection) url.openConnection(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
+		}
+		if (tlsContext != null) {
+			if (connection instanceof HttpsURLConnection) {
+				((HttpsURLConnection) connection).setSSLSocketFactory(tlsContext.getSocketFactory());
+			} else {
+				throw new IllegalStateException("Trusted root was set but no HTTPS was used.");
+			}
+		}
 		connection.setRequestMethod(method);
 		connection.setInstanceFollowRedirects(false);
 		connection.setUseCaches(false);
@@ -325,9 +319,10 @@ public class Http implements Closeable {
 			if (!headers.containsKey("Content-Type")) {
 				connection.setRequestProperty("Content-Type", requestData != null ? "application/octet-stream" : "application/x-www-form-urlencoded");
 			}
+			int contentLength = parseContentLength(headers.get("Content-Length"));
 			if (inputStream != null) {
 				connection.setDoOutput(true);
-				copyStream(inputStream, connection.getOutputStream());
+				copyStream(inputStream, connection.getOutputStream(), new CopyProgressListener(uploadProgressListener, contentLength));
 				connection.getOutputStream().flush();
 				if (inputStreamCloseWhenRead) {
 					try { inputStream.close(); }
@@ -339,7 +334,7 @@ public class Http implements Closeable {
 				}
 				connection.setRequestProperty("Content-Length", Integer.toString(requestData.length));
 				connection.setDoOutput(true);
-				connection.getOutputStream().write(requestData);
+				copyStream(new ByteArrayInputStream(requestData), connection.getOutputStream(), new CopyProgressListener(uploadProgressListener, contentLength));
 				connection.getOutputStream().flush();
 				requestData = null;
 			}
@@ -413,13 +408,37 @@ public class Http implements Closeable {
 	/**
 	 * Sets the progress listener to watch data download progress.
 	 * @param progressListener The callback listener.
+	 * @deprecated use Http.setDownloadProgressListener(ProgressListener) instead
+	 */
+	@Deprecated
+	public void setProgressListener(ProgressListener progressListener) {
+		setDownloadProgressListener(progressListener);
+	}
+
+	/**
+	 * Sets the progress listener to watch data download progress.
+	 * @param downloadProgressListener The callback listener.
+	 * @return This Http object for easy call chaining.
 	 * @see Http#getResponseData()
 	 * @see Http#getResponseString()
 	 * @see Http#writeResponseToStream(OutputStream)
 	 * @see Http#writeResponseToFile(File)
 	 */
-	public void setProgressListener(ProgressListener progressListener) {
-		this.progressListener = progressListener;
+	public Http setDownloadProgressListener(ProgressListener downloadProgressListener) {
+		this.downloadProgressListener = downloadProgressListener;
+		return this;
+	}
+
+	/**
+	 * Sets the progress listener to watch data uploaded progress.
+	 * @param uploadProgressListener The callback listener.
+	 * @return This Http object for easy call chaining.
+	 * @see Http#setData(File)
+	 * @see Http#setData(InputStream, boolean)
+	 */
+	public Http setUploadProgressListener(ProgressListener uploadProgressListener) {
+		this.uploadProgressListener = uploadProgressListener;
+		return this;
 	}
 
 	/**
@@ -428,10 +447,10 @@ public class Http implements Closeable {
 	 * @throws IOException When the underlying response stream cannot be read.
 	 */
 	public byte[] getResponseData() throws IOException {
-		String contentLength = getResponseHeader("Content-Length");
-		ByteArrayOutputStream buffer = new ByteArrayOutputStream(contentLength != null ? Integer.parseInt(contentLength) : BUFFER_SIZE);
+		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream(contentLength > 0 ? contentLength : BUFFER_SIZE);
 		try {
-			copyStream(getResponseStream(), buffer);
+			copyStream(getResponseStream(), buffer, new CopyProgressListener(downloadProgressListener, contentLength));
 			return buffer.toByteArray();
 		} finally {
 			close();
@@ -471,6 +490,8 @@ public class Http implements Closeable {
 	/**
 	 * Returns the response deserialized as an object. This method assumes that the response is a valid JSON.
 	 * This method uses {@link #getResponseStream()} method and takes care of closing the stream.
+	 * @param classType Class of object to return
+	 * @param <T> Type of object to return
 	 * @return The object deserialized from the response JSON.
 	 * @throws IOException When the underlying response stream cannot be opened.
 	 * @throws JsonParseException When the response cannot be parsed as a valid JSON.
@@ -497,8 +518,9 @@ public class Http implements Closeable {
 	 * or when the data cannot be written to the output stream.
 	 */
 	public int writeResponseToStream(OutputStream stream) throws IOException {
+		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
 		try {
-			return copyStream(getResponseStream(), stream);
+			return copyStream(getResponseStream(), stream, new CopyProgressListener(downloadProgressListener, contentLength));
 		} finally {
 			close();
 		}
@@ -537,21 +559,14 @@ public class Http implements Closeable {
 		}
 	}
 
-	private int copyStream(InputStream input, OutputStream output) throws IOException {
-		String contentLengthString = getResponseHeader("Content-Length");
-		int contentLength = (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ?
-				Integer.parseInt(contentLengthString) : -1;
+	private int copyStream(InputStream input, OutputStream output, CopyProgressListener progress) throws IOException {
 		byte[] buffer = new byte[BUFFER_SIZE];
 		int read, total = 0;
-		if (progressListener != null) {
-			progressListener.onHttpProgress(total, contentLength);
-		}
+		progress.onCopyProgress(total);
 		while ((read = input.read(buffer, 0, buffer.length)) >= 0) {
 			output.write(buffer, 0, read);
 			total += read;
-			if (progressListener != null) {
-				progressListener.onHttpProgress(total, contentLength);
-			}
+			progress.onCopyProgress(total);
 		}
 		return total;
 	}
@@ -564,6 +579,24 @@ public class Http implements Closeable {
 			}
 		}
 		return newHeaders;
+	}
+
+	private int parseContentLength(String contentLengthString) {
+		return (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ? Integer.parseInt(contentLengthString) : -1;
+	}
+
+	private static class CopyProgressListener {
+		private final ProgressListener listener;
+		private final int total;
+		CopyProgressListener(ProgressListener listener, int total) {
+			this.listener = listener;
+			this.total = total;
+		}
+		void onCopyProgress(int received) {
+			if (listener != null) {
+				listener.onHttpProgress(received, total);
+			}
+		}
 	}
 
 }
