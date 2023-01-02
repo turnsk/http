@@ -319,9 +319,9 @@ public class Http implements Closeable {
 			if (!headers.containsKey("Content-Type")) {
 				connection.setRequestProperty("Content-Type", requestData != null ? "application/octet-stream" : "application/x-www-form-urlencoded");
 			}
-			int contentLength = parseContentLength(headers.get("Content-Length"));
 			if (inputStream != null) {
 				connection.setDoOutput(true);
+				int contentLength = parseContentLength(headers.get("Content-Length"));
 				copyStream(inputStream, connection.getOutputStream(), new CopyProgressListener(uploadProgressListener, contentLength));
 				connection.getOutputStream().flush();
 				if (inputStreamCloseWhenRead) {
@@ -334,7 +334,7 @@ public class Http implements Closeable {
 				}
 				connection.setRequestProperty("Content-Length", Integer.toString(requestData.length));
 				connection.setDoOutput(true);
-				copyStream(new ByteArrayInputStream(requestData), connection.getOutputStream(), new CopyProgressListener(uploadProgressListener, contentLength));
+				copyStream(new ByteArrayInputStream(requestData), connection.getOutputStream(), new CopyProgressListener(uploadProgressListener, requestData.length));
 				connection.getOutputStream().flush();
 				requestData = null;
 			}
