@@ -82,7 +82,7 @@ public class Http implements Closeable {
 	 * Constant for HTTP delete method.
 	 */
 	public static final String DELETE = "DELETE";
-	private static String ENCODING = "utf-8";
+	private static final String ENCODING = "utf-8";
 	private static ExecutorService executor;
 	private static final int BUFFER_SIZE = 8192;
 
@@ -122,8 +122,7 @@ public class Http implements Closeable {
 	private Map<String, List<String>> responseHeaders;
 	private HttpURLConnection connection;
 	private SSLContext tlsContext;
-	private ProgressListener downloadProgressListener;
-	private ProgressListener uploadProgressListener;
+	private ProgressListener progressListener;
 
 	/**
 	 * Creates a HTTP object to an URL using a specific method.
@@ -322,7 +321,7 @@ public class Http implements Closeable {
 			if (inputStream != null) {
 				connection.setDoOutput(true);
 				int contentLength = parseContentLength(headers.get("Content-Length"));
-				copyStream(inputStream, connection.getOutputStream(), new CopyProgressListener(uploadProgressListener, contentLength));
+				copyStream(inputStream, connection.getOutputStream(), contentLength);
 				connection.getOutputStream().flush();
 				if (inputStreamCloseWhenRead) {
 					try { inputStream.close(); }
@@ -334,7 +333,7 @@ public class Http implements Closeable {
 				}
 				connection.setRequestProperty("Content-Length", Integer.toString(requestData.length));
 				connection.setDoOutput(true);
-				copyStream(new ByteArrayInputStream(requestData), connection.getOutputStream(), new CopyProgressListener(uploadProgressListener, requestData.length));
+				copyStream(new ByteArrayInputStream(requestData), connection.getOutputStream(), requestData.length);
 				connection.getOutputStream().flush();
 				requestData = null;
 			}
@@ -406,39 +405,17 @@ public class Http implements Closeable {
 	}
 
 	/**
-	 * Sets the progress listener to watch data download progress.
+	 * Sets the progress listener to watch data upload / download progress.
 	 * @param progressListener The callback listener.
-	 * @deprecated use Http.setDownloadProgressListener(ProgressListener) instead
-	 */
-	@Deprecated
-	public void setProgressListener(ProgressListener progressListener) {
-		setDownloadProgressListener(progressListener);
-	}
-
-	/**
-	 * Sets the progress listener to watch data download progress.
-	 * @param downloadProgressListener The callback listener.
-	 * @return This Http object for easy call chaining.
 	 * @see Http#getResponseData()
 	 * @see Http#getResponseString()
 	 * @see Http#writeResponseToStream(OutputStream)
 	 * @see Http#writeResponseToFile(File)
-	 */
-	public Http setDownloadProgressListener(ProgressListener downloadProgressListener) {
-		this.downloadProgressListener = downloadProgressListener;
-		return this;
-	}
-
-	/**
-	 * Sets the progress listener to watch data uploaded progress.
-	 * @param uploadProgressListener The callback listener.
-	 * @return This Http object for easy call chaining.
 	 * @see Http#setData(File)
 	 * @see Http#setData(InputStream, boolean)
 	 */
-	public Http setUploadProgressListener(ProgressListener uploadProgressListener) {
-		this.uploadProgressListener = uploadProgressListener;
-		return this;
+	public void setProgressListener(ProgressListener progressListener) {
+		this.progressListener = progressListener;
 	}
 
 	/**
@@ -450,7 +427,7 @@ public class Http implements Closeable {
 		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
 		ByteArrayOutputStream buffer = new ByteArrayOutputStream(contentLength > 0 ? contentLength : BUFFER_SIZE);
 		try {
-			copyStream(getResponseStream(), buffer, new CopyProgressListener(downloadProgressListener, contentLength));
+			copyStream(getResponseStream(), buffer, contentLength);
 			return buffer.toByteArray();
 		} finally {
 			close();
@@ -520,7 +497,7 @@ public class Http implements Closeable {
 	public int writeResponseToStream(OutputStream stream) throws IOException {
 		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
 		try {
-			return copyStream(getResponseStream(), stream, new CopyProgressListener(downloadProgressListener, contentLength));
+			return copyStream(getResponseStream(), stream, contentLength);
 		} finally {
 			close();
 		}
@@ -549,7 +526,7 @@ public class Http implements Closeable {
 	/**
 	 * Closes the underlying connection. This method is automatically called from {@link Http#getResponseData()},
 	 * {@link Http#getResponseString()}, {@link #writeResponseToStream(OutputStream)} and {@link #writeResponseToFile(File)}.
-	 * You must called this method manually if you're using {@link #getResponseStream()}.
+	 * You have to call this method manually if you're using {@link #getResponseStream()}.
 	 */
 	@Override
 	public void close() {
@@ -559,14 +536,18 @@ public class Http implements Closeable {
 		}
 	}
 
-	private int copyStream(InputStream input, OutputStream output, CopyProgressListener progress) throws IOException {
+	private int copyStream(InputStream input, OutputStream output, int contentLength) throws IOException {
 		byte[] buffer = new byte[BUFFER_SIZE];
 		int read, total = 0;
-		progress.onCopyProgress(total);
+		if (progressListener != null) {
+			progressListener.onHttpProgress(total, contentLength);
+		}
 		while ((read = input.read(buffer, 0, buffer.length)) >= 0) {
 			output.write(buffer, 0, read);
 			total += read;
-			progress.onCopyProgress(total);
+			if (progressListener != null) {
+				progressListener.onHttpProgress(total, contentLength);
+			}
 		}
 		return total;
 	}
@@ -583,20 +564,6 @@ public class Http implements Closeable {
 
 	private int parseContentLength(String contentLengthString) {
 		return (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ? Integer.parseInt(contentLengthString) : -1;
-	}
-
-	private static class CopyProgressListener {
-		private final ProgressListener listener;
-		private final int total;
-		CopyProgressListener(ProgressListener listener, int total) {
-			this.listener = listener;
-			this.total = total;
-		}
-		void onCopyProgress(int received) {
-			if (listener != null) {
-				listener.onHttpProgress(received, total);
-			}
-		}
 	}
 
 }
