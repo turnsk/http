@@ -4,17 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 
 import javax.net.ssl.*;
-import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -22,10 +12,6 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.Certificate;
-import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -66,7 +52,7 @@ public class Http implements Closeable {
 	 */
 	public interface ProgressListener {
 		/**
-		 * Is called every time the amount of data downloaded changes.
+		 * Is called every time the amount of data downloaded (or uploaded) changes.
 		 *
 		 * @param bytesReceived Number of bytes already transmitted.
 		 * @param bytesTotal Total number of bytes to transmit, may be -1 if Content-Length header is not set.
@@ -96,7 +82,7 @@ public class Http implements Closeable {
 	 * Constant for HTTP delete method.
 	 */
 	public static final String DELETE = "DELETE";
-	private static String ENCODING = "utf-8";
+	private static final String ENCODING = "utf-8";
 	private static ExecutorService executor;
 	private static final int BUFFER_SIZE = 8192;
 
@@ -250,34 +236,41 @@ public class Http implements Closeable {
 	 * Sets the data to send as HTTP post body to be read from a file. Note, that the file must exist
 	 * when the actual request is being sent, either synchronously (during calling {@link Http#send()})
 	 * or asynchronously (before {@link Http.Listener#onHttpResult(Http)} is called).
+	 * If header "Content-Length" is not already set, it will be set to the supplied file size in bytes.
 	 * @param file A valid {@link java.io.File} reference.
 	 * @return This Http object for easy call chaining.
 	 * @throws IOException When the supplied file cannot be opened.
 	 */
 	public Http setData(File file) throws IOException {
+		if (!file.exists() || !file.isFile()) {
+			throw new IOException("Invalid file");
+		}
+		if (!headers.containsKey("Content-Length")) {
+			addHeader("Content-Length", String.valueOf(file.length()));
+		}
 		return setData(new FileInputStream(file), true);
 	}
 
-  /**
-   * Sets the root certificate to be trusted (certificate pinning). When using this, the System certificate
-   * store is ignored and only this certificate is implicitly trusted.
-   * @param certificate A trusted certificate
-   * @return This Http object for easy call chaining.
-   */
+	/**
+	 * Sets the root certificate to be trusted (certificate pinning). When using this, the System certificate
+	 * store is ignored and only this certificate is implicitly trusted.
+	 * @param certificate A trusted certificate
+	 * @return This Http object for easy call chaining.
+	 */
 	public Http setTrustedRoot(X509Certificate certificate) throws IllegalArgumentException {
-	  try {
-      KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-      keyStore.load(null, null);
-      keyStore.setCertificateEntry("ca", certificate);
-      TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-      tmf.init(keyStore);
-      tlsContext = SSLContext.getInstance("TLS");
-      tlsContext.init(null, tmf.getTrustManagers(), null);
-    } catch (Exception e) {
-	    throw new IllegalArgumentException(e);
-    }
-	  return this;
-  }
+		try {
+			KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+			keyStore.load(null, null);
+			keyStore.setCertificateEntry("ca", certificate);
+			TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+			tmf.init(keyStore);
+			tlsContext = SSLContext.getInstance("TLS");
+			tlsContext.init(null, tmf.getTrustManagers(), null);
+		} catch (Exception e) {
+			throw new IllegalArgumentException(e);
+		}
+		return this;
+	}
 
 	/**
 	 * Sends the HTTP request synchronously.
@@ -298,17 +291,17 @@ public class Http implements Closeable {
 		}
 		URL url = new URL(this.url + (method.equalsIgnoreCase(GET) && params != null ? "?" + params : ""));
 		if (proxyHost == null || proxyHost.length() == 0 || proxyPort == 0) {
-		  connection = (HttpURLConnection) url.openConnection();
-    } else {
-		  connection = (HttpURLConnection) url.openConnection(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
-    }
-    if (tlsContext != null) {
-      if (connection instanceof HttpsURLConnection) {
-        ((HttpsURLConnection) connection).setSSLSocketFactory(tlsContext.getSocketFactory());
-      } else {
-        throw new IllegalStateException("Trusted root was set but no HTTPS was used.");
-      }
-    }
+			connection = (HttpURLConnection) url.openConnection();
+		} else {
+			connection = (HttpURLConnection) url.openConnection(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
+		}
+		if (tlsContext != null) {
+			if (connection instanceof HttpsURLConnection) {
+				((HttpsURLConnection) connection).setSSLSocketFactory(tlsContext.getSocketFactory());
+			} else {
+				throw new IllegalStateException("Trusted root was set but no HTTPS was used.");
+			}
+		}
 		connection.setRequestMethod(method);
 		connection.setInstanceFollowRedirects(false);
 		connection.setUseCaches(false);
@@ -327,7 +320,8 @@ public class Http implements Closeable {
 			}
 			if (inputStream != null) {
 				connection.setDoOutput(true);
-				copyStream(inputStream, connection.getOutputStream());
+				int contentLength = parseContentLength(headers.get("Content-Length"));
+				copyStream(inputStream, connection.getOutputStream(), contentLength);
 				connection.getOutputStream().flush();
 				if (inputStreamCloseWhenRead) {
 					try { inputStream.close(); }
@@ -339,7 +333,7 @@ public class Http implements Closeable {
 				}
 				connection.setRequestProperty("Content-Length", Integer.toString(requestData.length));
 				connection.setDoOutput(true);
-				connection.getOutputStream().write(requestData);
+				copyStream(new ByteArrayInputStream(requestData), connection.getOutputStream(), requestData.length);
 				connection.getOutputStream().flush();
 				requestData = null;
 			}
@@ -411,12 +405,14 @@ public class Http implements Closeable {
 	}
 
 	/**
-	 * Sets the progress listener to watch data download progress.
+	 * Sets the progress listener to watch data upload / download progress.
 	 * @param progressListener The callback listener.
 	 * @see Http#getResponseData()
 	 * @see Http#getResponseString()
 	 * @see Http#writeResponseToStream(OutputStream)
 	 * @see Http#writeResponseToFile(File)
+	 * @see Http#setData(File)
+	 * @see Http#setData(InputStream, boolean)
 	 */
 	public void setProgressListener(ProgressListener progressListener) {
 		this.progressListener = progressListener;
@@ -428,10 +424,10 @@ public class Http implements Closeable {
 	 * @throws IOException When the underlying response stream cannot be read.
 	 */
 	public byte[] getResponseData() throws IOException {
-		String contentLength = getResponseHeader("Content-Length");
-		ByteArrayOutputStream buffer = new ByteArrayOutputStream(contentLength != null ? Integer.parseInt(contentLength) : BUFFER_SIZE);
+		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream(contentLength > 0 ? contentLength : BUFFER_SIZE);
 		try {
-			copyStream(getResponseStream(), buffer);
+			copyStream(getResponseStream(), buffer, contentLength);
 			return buffer.toByteArray();
 		} finally {
 			close();
@@ -471,6 +467,8 @@ public class Http implements Closeable {
 	/**
 	 * Returns the response deserialized as an object. This method assumes that the response is a valid JSON.
 	 * This method uses {@link #getResponseStream()} method and takes care of closing the stream.
+	 * @param classType Class of object to return
+	 * @param <T> Type of object to return
 	 * @return The object deserialized from the response JSON.
 	 * @throws IOException When the underlying response stream cannot be opened.
 	 * @throws JsonParseException When the response cannot be parsed as a valid JSON.
@@ -497,8 +495,9 @@ public class Http implements Closeable {
 	 * or when the data cannot be written to the output stream.
 	 */
 	public int writeResponseToStream(OutputStream stream) throws IOException {
+		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
 		try {
-			return copyStream(getResponseStream(), stream);
+			return copyStream(getResponseStream(), stream, contentLength);
 		} finally {
 			close();
 		}
@@ -527,7 +526,7 @@ public class Http implements Closeable {
 	/**
 	 * Closes the underlying connection. This method is automatically called from {@link Http#getResponseData()},
 	 * {@link Http#getResponseString()}, {@link #writeResponseToStream(OutputStream)} and {@link #writeResponseToFile(File)}.
-	 * You must called this method manually if you're using {@link #getResponseStream()}.
+	 * You have to call this method manually if you're using {@link #getResponseStream()}.
 	 */
 	@Override
 	public void close() {
@@ -537,10 +536,7 @@ public class Http implements Closeable {
 		}
 	}
 
-	private int copyStream(InputStream input, OutputStream output) throws IOException {
-		String contentLengthString = getResponseHeader("Content-Length");
-		int contentLength = (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ?
-				Integer.parseInt(contentLengthString) : -1;
+	private int copyStream(InputStream input, OutputStream output, int contentLength) throws IOException {
 		byte[] buffer = new byte[BUFFER_SIZE];
 		int read, total = 0;
 		if (progressListener != null) {
@@ -564,6 +560,10 @@ public class Http implements Closeable {
 			}
 		}
 		return newHeaders;
+	}
+
+	private int parseContentLength(String contentLengthString) {
+		return (contentLengthString != null && contentLengthString.matches("^[0-9]+$")) ? Integer.parseInt(contentLengthString) : -1;
 	}
 
 }
