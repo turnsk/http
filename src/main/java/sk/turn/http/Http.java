@@ -420,7 +420,7 @@ public class Http implements Closeable {
 
 	/**
 	 * Returns the raw response data.
-	 * The underlying connection is automatically closed when the data read.
+	 * The underlying connection is automatically closed when the data is read.
 	 * @return Raw response data.
 	 * @throws IOException When the underlying response stream cannot be read.
 	 */
@@ -430,7 +430,7 @@ public class Http implements Closeable {
 
 	/**
 	 * Returns the response data as a string.
-	 * The underlying connection is automatically closed when the data read.
+	 * The underlying connection is automatically closed when the data is read.
 	 * @return Response data decoded to string using UTF-8 encoding or null in case of any error.
 	 */
 	public String getResponseString() {
@@ -495,8 +495,8 @@ public class Http implements Closeable {
 	}
 
 	/**
-	 * Writes the response data directly to a file. The underlying connection is automatically closed
-	 * when the data is copied.
+	 * Writes the response data directly to a file.
+	 * The underlying connection is automatically closed when the data is copied.
 	 * @param file A valid file to write the response data to.
 	 * @return The number of bytes written.
 	 * @throws IOException When the underlying response stream cannot be opened or read,
