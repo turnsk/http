@@ -59,7 +59,7 @@ public class HttpsTest {
     try (InputStream in = getClass().getClassLoader().getResourceAsStream("badssl_untrusted_root.pem")) {
       CertificateFactory fact = CertificateFactory.getInstance("X.509");
       X509Certificate cert = (X509Certificate) fact.generateCertificate(in);
-      new Http("http://httpstat.us/200", Http.GET).setTrustedRoot(cert).send();
+      new Http("http://www.google.com", Http.GET).setTrustedRoot(cert).send();
     }
   }
 

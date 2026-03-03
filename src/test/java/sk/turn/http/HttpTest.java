@@ -5,24 +5,26 @@ import org.junit.Test;
 
 public class HttpTest {
 
+	private static final String STAT_URL = "https://tools-httpstatus.pickup-services.com";
+
 	@Test
 	public void syncGet() throws java.io.IOException {
-		Http http = new Http("http://httpstat.us/200", Http.GET).send();
+		Http http = new Http(STAT_URL + "/200", Http.GET).send();
 		Assert.assertEquals(200, http.getResponseCode());
 		Assert.assertEquals("OK", http.getResponseMessage());
 	}
 
 	@Test
 	public void syncGetMoved() throws java.io.IOException {
-		Http http = new Http("http://httpstat.us/301", Http.GET).send();
+		Http http = new Http(STAT_URL + "/301", Http.GET).send();
 		Assert.assertEquals(301, http.getResponseCode());
 		Assert.assertEquals("Moved Permanently", http.getResponseMessage());
-		Assert.assertEquals("https://httpstat.us", http.getResponseHeader("Location"));
+		Assert.assertEquals("https://httpstat.us/", http.getResponseHeader("Location"));
 	}
 
 	@Test
 	public void syncPost() throws java.io.IOException {
-		Http http = new Http("http://httpstat.us/200", Http.POST).send();
+		Http http = new Http(STAT_URL + "/200", Http.POST).send();
 		Assert.assertEquals(200, http.getResponseCode());
 		Assert.assertEquals("OK", http.getResponseMessage());
 	}
@@ -30,7 +32,7 @@ public class HttpTest {
 	@Test
 	public void asyncGet() {
 		final boolean[] lock = { true };
-		Http http = new Http("http://httpstat.us/200", Http.GET).send(new Http.Listener() {
+		Http http = new Http(STAT_URL + "/200", Http.GET).send(new Http.Listener() {
 			public void onHttpResult(Http http) {
 				synchronized (lock) {
 					lock[0] = false;
