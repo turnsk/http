@@ -125,7 +125,7 @@ public class Http implements Closeable {
 	private ProgressListener progressListener;
 
 	/**
-	 * Creates a HTTP object to an URL using a specific method.
+	 * Creates an HTTP object to a URL using a specific method.
 	 * @param url The URL of the resource to load. Do not append GET parameters here, use rather {@link Http#addParam(String, String)} method.
 	 * @param method The HTTP method to use, you may use {@link Http#GET}, {@link Http#POST}, {@link Http#PUT} or {@link Http#DELETE} helper fields.
 	 */
@@ -137,7 +137,7 @@ public class Http implements Closeable {
 	}
 
 	/**
-	 * Adds a HTTP request header. If a header with the key already exists, it is overwritten.
+	 * Adds an HTTP request header. If a header with the key already exists, it is overwritten.
 	 * @param key The request header name.
 	 * @param value The request header value.
 	 * @return This Http object for easy call chaining.
@@ -420,28 +420,22 @@ public class Http implements Closeable {
 
 	/**
 	 * Returns the raw response data.
+	 * The underlying connection is automatically closed when the data read.
 	 * @return Raw response data.
 	 * @throws IOException When the underlying response stream cannot be read.
 	 */
 	public byte[] getResponseData() throws IOException {
-		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
-		ByteArrayOutputStream buffer = new ByteArrayOutputStream(contentLength > 0 ? contentLength : BUFFER_SIZE);
-		try {
-			copyStream(getResponseStream(), buffer, contentLength);
-			return buffer.toByteArray();
-		} finally {
-			close();
-			buffer.close();
-		}
+		return getResponseBuffer().toByteArray();
 	}
 
 	/**
 	 * Returns the response data as a string.
-	 * @return Response data decoded to string using UTF-8 encoding.
+	 * The underlying connection is automatically closed when the data read.
+	 * @return Response data decoded to string using UTF-8 encoding or null in case of any error.
 	 */
 	public String getResponseString() {
 		try {
-			return new String(getResponseData(), ENCODING);
+			return getResponseBuffer().toString(ENCODING);
 		} catch (Exception e) {
 			return null;
 		}
@@ -467,6 +461,7 @@ public class Http implements Closeable {
 	/**
 	 * Returns the response deserialized as an object. This method assumes that the response is a valid JSON.
 	 * This method uses {@link #getResponseStream()} method and takes care of closing the stream.
+	 * The underlying connection is automatically closed when the data is parsed.
 	 * @param classType Class of object to return
 	 * @param <T> Type of object to return
 	 * @return The object deserialized from the response JSON.
@@ -474,21 +469,17 @@ public class Http implements Closeable {
 	 * @throws JsonParseException When the response cannot be parsed as a valid JSON.
 	 */
 	public <T> T getResponseObject(Class<? extends T> classType) throws IOException, JsonParseException {
-		InputStream inputStream = null;
-		try {
-			inputStream = getResponseStream();
-			return new Gson().fromJson(new InputStreamReader(inputStream), classType);
+		try (InputStream responseStream = getResponseStream()) {
+			return new Gson().fromJson(new InputStreamReader(responseStream), classType);
 		} finally {
-			if (inputStream != null) {
-				try { inputStream.close(); }
-				catch (IOException e) { }
-			}
+			close();
 		}
 	}
 
 	/**
-	 * Writes the response data directly to a stream. The underlying connection is automatically closed
-	 * when the data is copied.
+	 * Writes the response data directly to a stream.
+	 * This method uses {@link #getResponseStream()} method and takes care of closing the stream.
+	 * The underlying connection is automatically closed when the data is copied.
 	 * @param stream The stream to write the response data to.
 	 * @return The number of bytes written.
 	 * @throws IOException When the underlying response stream cannot be opened or read,
@@ -496,8 +487,8 @@ public class Http implements Closeable {
 	 */
 	public int writeResponseToStream(OutputStream stream) throws IOException {
 		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
-		try {
-			return copyStream(getResponseStream(), stream, contentLength);
+		try (InputStream responseStream = getResponseStream()) {
+			return copyStream(responseStream, stream, contentLength);
 		} finally {
 			close();
 		}
@@ -512,20 +503,18 @@ public class Http implements Closeable {
 	 * or when the data cannot be written to the file.
 	 */
 	public int writeResponseToFile(File file) throws IOException {
-		FileOutputStream fileStream = null;
-		try {
-			fileStream = new FileOutputStream(file);
+		try (FileOutputStream fileStream = new FileOutputStream(file)) {
 			return writeResponseToStream(fileStream);
-		} finally {
-			if (fileStream != null) {
-				fileStream.close();
-			}
 		}
 	}
 
 	/**
-	 * Closes the underlying connection. This method is automatically called from {@link Http#getResponseData()},
-	 * {@link Http#getResponseString()}, {@link #writeResponseToStream(OutputStream)} and {@link #writeResponseToFile(File)}.
+	 * Closes the underlying connection. This method is automatically called from
+	 * {@link Http#getResponseData()},
+	 * {@link Http#getResponseString()},
+	 * {@link Http#getResponseObject(Class)},
+	 * {@link #writeResponseToStream(OutputStream)},
+	 * {@link #writeResponseToFile(File)}.
 	 * You have to call this method manually if you're using {@link #getResponseStream()}.
 	 */
 	@Override
@@ -534,6 +523,13 @@ public class Http implements Closeable {
 			connection.disconnect();
 			connection = null;
 		}
+	}
+
+	private ByteArrayOutputStream getResponseBuffer() throws IOException {
+		int contentLength = parseContentLength(getResponseHeader("Content-Length"));
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream(contentLength > 0 ? contentLength : BUFFER_SIZE);
+		writeResponseToStream(buffer);
+		return buffer;
 	}
 
 	private int copyStream(InputStream input, OutputStream output, int contentLength) throws IOException {
